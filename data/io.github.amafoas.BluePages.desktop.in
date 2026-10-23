@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Blue Pages
+Comment=Open your saved network servers in Files
+Keywords=server;network;smb;sftp;ftp;webdav;nautilus;
+Exec=@BINDIR@/bp
+Icon=network-server
+Terminal=false
+Categories=Network;GTK;
+StartupNotify=true
+StartupWMClass=io.github.amafoas.BluePages
