@@ -267,21 +267,64 @@ class Window(Adw.ApplicationWindow):
 
     def _delete(self):
         item = self.context_item
-        body = ("Its contents will move to the parent folder." if item.kind == "folder"
-                else "Its password will also be removed from the keyring.")
-        dialog = Adw.AlertDialog(heading=f"Delete “{item.data['name']}”?", body=body)
+        if item.kind == "folder":
+            self._delete_folder(item.data)
+            return
+        dialog = Adw.AlertDialog(heading=f"Delete “{item.data['name']}”?",
+                                 body="Its password will also be removed from the keyring.")
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
         dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
 
         def on_response(_d, response):
-            if response != "delete":
-                return
-            if item.kind == "server":
+            if response == "delete":
                 self.store.delete_server(item.data)
+                self.refresh()
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
+
+    def _delete_folder(self, folder):
+        subtree = self.store.subtree(folder["id"])
+        n_servers = sum(s["folder_id"] in subtree for s in self.store.servers)
+        n_folders = len(subtree) - 1
+        dialog = Adw.AlertDialog(heading=f"Delete “{folder['name']}”?")
+        dialog.add_response("cancel", "Cancel")
+
+        if not n_servers and not n_folders:
+            dialog.set_body("The folder is empty.")
+            dialog.add_response("delete", "Delete")
+            dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        else:
+            parts = [f"{n} {word}{'' if n == 1 else 's'}"
+                     for n, word in ((n_servers, "server"), (n_folders, "folder")) if n]
+            dialog.set_body(f"It contains {' and '.join(parts)}. Move them to another folder "
+                            "or delete them all, including saved passwords.")
+            paths = [(None, "(Root)")] + self.store.folder_paths(exclude=folder["id"])
+            ids = [p[0] for p in paths]
+            target = Adw.ComboRow(title="Move Contents To",
+                                  model=Gtk.StringList.new([p[1] for p in paths]))
+            target.set_selected(ids.index(folder["parent_id"]) if folder["parent_id"] in ids else 0)
+            group = Adw.PreferencesGroup()
+            group.add(target)
+            dialog.set_extra_child(group)
+            dialog.add_response("move", "Move")
+            dialog.add_response("delete-all", "Delete All")
+            dialog.set_response_appearance("delete-all", Adw.ResponseAppearance.DESTRUCTIVE)
+            dialog.set_response_appearance("move", Adw.ResponseAppearance.SUGGESTED)
+            dialog.set_default_response("move")
+
+        def on_response(_d, response):
+            if response == "cancel":
+                return
+            if response == "move":
+                move_to = ids[target.get_selected()]
+                self.store.delete_folder(folder, move_to=move_to)
+                self.expanded.discard(folder["id"])
+                self.expanded.update(self.store.ancestors(move_to))
             else:
-                self.expanded.discard(item.data["id"])
-                self.store.delete_folder(item.data)
+                self.store.delete_folder(folder, delete_contents=True)
+                self.expanded -= subtree
             self.refresh()
 
         dialog.connect("response", on_response)

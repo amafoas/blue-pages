@@ -139,16 +139,29 @@ class Store:
         folder["parent_id"] = parent_id
         self.save()
 
-    def delete_folder(self, folder):
-        """Delete the folder; its contents move to the parent folder."""
-        parent = folder["parent_id"]
-        for f in self.folders:
-            if f["parent_id"] == folder["id"]:
-                f["parent_id"] = parent
-        for s in self.servers:
-            if s["folder_id"] == folder["id"]:
-                s["folder_id"] = parent
-        self.folders.remove(folder)
+    def subtree(self, folder_id):
+        """IDs of folder_id and every folder nested inside it."""
+        ids = {folder_id}
+        for f in self.children(folder_id)[0]:
+            ids |= self.subtree(f["id"])
+        return ids
+
+    def delete_folder(self, folder, delete_contents=False, move_to=None):
+        """Delete the folder, either with everything inside it or moving its contents to move_to."""
+        if delete_contents:
+            ids = self.subtree(folder["id"])
+            for s in [s for s in self.servers if s["folder_id"] in ids]:
+                Secret.password_clear_sync(SCHEMA, {"id": s["id"]}, None)
+                self.servers.remove(s)
+            self.folders = [f for f in self.folders if f["id"] not in ids]
+        else:
+            for f in self.folders:
+                if f["parent_id"] == folder["id"]:
+                    f["parent_id"] = move_to
+            for s in self.servers:
+                if s["folder_id"] == folder["id"]:
+                    s["folder_id"] = move_to
+            self.folders.remove(folder)
         self.save()
 
     def add_server(self, data, password):
