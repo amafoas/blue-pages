@@ -8,6 +8,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GObject, Gtk, Pango
 
 from . import APP_ID, APP_NAME, connect
+from .settings import Settings
 from .store import PROTOCOLS, Store
 
 
@@ -140,6 +141,30 @@ class FolderDialog(FormDialog):
         return True
 
 
+class PreferencesDialog(Adw.PreferencesDialog):
+    OPEN_IN = [("window", "New Window"), ("tab", "New Tab")]
+
+    def __init__(self, settings):
+        super().__init__()
+        self.settings = settings
+
+        open_in = Adw.ComboRow(
+            title="Open Servers In",
+            subtitle="A new tab is added to the Files window that is already open",
+            model=Gtk.StringList.new([label for _, label in self.OPEN_IN]),
+        )
+        keys = [key for key, _ in self.OPEN_IN]
+        open_in.set_selected(keys.index(settings["open_in"]))
+        open_in.connect("notify::selected",
+                        lambda row, _: settings.__setitem__("open_in", keys[row.get_selected()]))
+
+        group = Adw.PreferencesGroup(title="Files")
+        group.add(open_in)
+        page = Adw.PreferencesPage(title="General", icon_name="preferences-system-symbolic")
+        page.add(group)
+        self.add(page)
+
+
 # --- main window ----------------------------------------------------------
 
 
@@ -147,6 +172,7 @@ class Window(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title=APP_NAME, default_width=420, default_height=560)
         self.store = Store()
+        self.settings = Settings()
         self.expanded = set()
         self._refreshing = False
         self.context_item = None
@@ -159,6 +185,10 @@ class Window(Adw.ApplicationWindow):
         add_menu.append("New Folder", "win.new-folder")
         header.pack_start(Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=add_menu,
                                          tooltip_text="Add"))
+        main_menu = Gio.Menu()
+        main_menu.append("Preferences", "win.preferences")
+        header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=main_menu,
+                                       primary=True, tooltip_text="Main Menu"))
         search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic", tooltip_text="Search")
         header.pack_end(search_btn)
 
@@ -213,6 +243,7 @@ class Window(Adw.ApplicationWindow):
             "ctx-new-folder": lambda: self._new_folder(self.context_item.data["id"]),
             "ctx-edit": self._edit,
             "ctx-delete": self._delete,
+            "preferences": lambda: PreferencesDialog(self.settings).present(self),
         }
         for name, cb in actions.items():
             action = Gio.SimpleAction(name=name)
@@ -406,12 +437,17 @@ class Window(Adw.ApplicationWindow):
                 self.toasts.add_toast(Adw.Toast(title=f"{server['name']}: {error}", timeout=6))
 
         connect.open_server(server, self.store.get_password(server["id"]), self, done,
-                            on_new_password=lambda pw: self.store.set_password(server, pw))
+                            on_new_password=lambda pw: self.store.set_password(server, pw),
+                            new_window=self.settings["open_in"] == "window")
 
 
 class App(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        self.set_accels_for_action("win.preferences", ["<Control>comma"])
 
     def do_activate(self):
         win = self.get_active_window() or Window(self)

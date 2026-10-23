@@ -51,6 +51,8 @@ Your saved servers and passwords are not deleted.
 - **Click** a server to mount it and open it in Files. Click a folder to expand it.
 - **Right-click** a row to edit or delete it, or to create a server or subfolder inside a folder.
 - Start typing (or use the search button) to filter servers.
+- **Preferences** (main menu or <kbd>Ctrl</kbd>+<kbd>,</kbd>): choose whether servers open
+  in a new Files window or in a new tab of the window that is already open.
 
 **Address** is a host, optionally followed by a path: `fileserver.local`,
 `fileserver.local/shared`, `192.168.1.10:2222`. For SMB, the user can include a domain:

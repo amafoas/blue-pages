@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib
+from gi.repository import Adw, Gdk, Gio, GLib
 
 # Keeps MountOperations alive while the mount is in progress.
 _pending = set()
@@ -29,12 +29,46 @@ def _split_domain(user):
     return None, user
 
 
-def open_in_files(uri):
+def _launch_default(uri):
     app = Gio.AppInfo.get_default_for_type("inode/directory", False)
     if app is not None:
         app.launch_uris([uri], None)
     else:
         Gio.AppInfo.launch_default_for_uri(uri, None)
+
+
+def open_in_files(uri, new_window=True):
+    """Open uri in Nautilus, as a new window or as a new tab of an open window.
+
+    Nautilus' .desktop file always passes --new-window, so we talk to it over
+    D-Bus instead: without the "new-window" hint it opens a tab in the active
+    window. Falls back to the default file manager if Nautilus isn't available.
+    """
+    platform_data = {}
+    token = Gdk.Display.get_default().get_app_launch_context().get_startup_notify_id(None, [])
+    if token:
+        # Lets Nautilus raise its window instead of being blocked by focus-stealing prevention.
+        platform_data["activation-token"] = GLib.Variant("s", token)
+        platform_data["desktop-startup-id"] = GLib.Variant("s", token)
+
+    def on_reply(bus, result):
+        try:
+            bus.call_finish(result)
+        except GLib.Error:
+            _launch_default(uri)
+
+    Gio.bus_get_sync(Gio.BusType.SESSION).call(
+        "org.gnome.Nautilus",
+        "/org/gnome/Nautilus",
+        "org.gtk.Application",
+        "Open",
+        GLib.Variant("(assa{sv})", ([uri], "new-window" if new_window else "", platform_data)),
+        None,
+        Gio.DBusCallFlags.NONE,
+        -1,
+        None,
+        on_reply,
+    )
 
 
 def _ask_password_dialog(parent, name, message, on_reply):
@@ -83,7 +117,7 @@ def _ask_question_dialog(parent, message, choices, on_reply):
     dialog.present(parent)
 
 
-def open_server(server, password, parent, on_done, on_new_password=None):
+def open_server(server, password, parent, on_done, on_new_password=None, new_window=True):
     """Mount and open the server. on_done(error_msg | None) is called when finished."""
     uri = build_uri(server)
     domain, user = _split_domain(server.get("user", "").strip())
@@ -146,7 +180,7 @@ def open_server(server, password, parent, on_done, on_new_password=None):
                 on_done(e.message)
                 return
         try:
-            open_in_files(uri)
+            open_in_files(uri, new_window)
         except GLib.Error as e:
             on_done(e.message)
             return
