@@ -53,6 +53,10 @@ Your saved servers and passwords are not deleted.
   On a server, **Open SSH Terminal** opens a terminal running `ssh user@host` (the port in the
   address is used only for SFTP servers; the password is typed in the terminal). The terminal
   is titled `folder · server · host`, although the remote shell may replace that title.
+- **Export…** (right-click a server or folder, or **Export All…** in the main menu) saves the
+  servers and folders to a JSON file. Passwords are never exported.
+- **Import…** (main menu, or **Import Here…** when right-clicking a folder to import inside it)
+  adds the servers and folders of an exported file, without replacing the ones you already have. Passwords have to be entered again.
 - Start typing (or use the search button) to filter servers.
 - **Preferences** (main menu or <kbd>Ctrl</kbd>+<kbd>,</kbd>): choose whether servers open
   in a new Files window or in a new tab of the window that is already open.

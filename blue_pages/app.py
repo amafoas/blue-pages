@@ -1,4 +1,5 @@
 """Main window and dialogs."""
+import json
 import sys
 
 import gi
@@ -18,6 +19,20 @@ class Item(GObject.Object):
         self.kind = kind  # "folder" | "server"
         self.data = data
         self.subtitle = subtitle
+
+
+def count_text(n_servers, n_folders):
+    """'3 servers and 1 folder'."""
+    parts = [f"{n} {word}{'' if n == 1 else 's'}"
+             for n, word in ((n_servers, "server"), (n_folders, "folder")) if n]
+    return " and ".join(parts) or "0 servers"
+
+
+def json_filter():
+    f = Gtk.FileFilter(name="JSON Files")
+    f.add_mime_type("application/json")
+    f.add_suffix("json")
+    return f
 
 
 # --- dialogs ---------------------------------------------------------------
@@ -186,7 +201,13 @@ class Window(Adw.ApplicationWindow):
         header.pack_start(Gtk.MenuButton(icon_name="list-add-symbolic", menu_model=add_menu,
                                          tooltip_text="Add"))
         main_menu = Gio.Menu()
-        main_menu.append("Preferences", "win.preferences")
+        data_section = Gio.Menu()
+        data_section.append("Import…", "win.import")
+        data_section.append("Export All…", "win.export-all")
+        main_menu.append_section(None, data_section)
+        prefs_section = Gio.Menu()
+        prefs_section.append("Preferences", "win.preferences")
+        main_menu.append_section(None, prefs_section)
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=main_menu,
                                        primary=True, tooltip_text="Main Menu"))
         search_btn = Gtk.ToggleButton(icon_name="system-search-symbolic", tooltip_text="Search")
@@ -242,8 +263,12 @@ class Window(Adw.ApplicationWindow):
             "ctx-ssh": lambda: self.open_ssh(self.context_item.data),
             "ctx-new-server": lambda: self._new_server(self.context_item.data["id"]),
             "ctx-new-folder": lambda: self._new_folder(self.context_item.data["id"]),
+            "ctx-export": lambda: self._export(self.context_item),
+            "ctx-import": lambda: self._import(self.context_item.data),
             "ctx-edit": self._edit,
             "ctx-delete": self._delete,
+            "export-all": lambda: self._export(None),
+            "import": lambda: self._import(None),
             "preferences": lambda: PreferencesDialog(self.settings).present(self),
         }
         for name, cb in actions.items():
@@ -297,9 +322,7 @@ class Window(Adw.ApplicationWindow):
             dialog.add_response("delete", "Delete")
             dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
         else:
-            parts = [f"{n} {word}{'' if n == 1 else 's'}"
-                     for n, word in ((n_servers, "server"), (n_folders, "folder")) if n]
-            dialog.set_body(f"It contains {' and '.join(parts)}. Move them to another folder "
+            dialog.set_body(f"It contains {count_text(n_servers, n_folders)}. Move them to another folder "
                             "or delete them all, including saved passwords.")
             paths = [(None, "(Root)")] + self.store.folder_paths(exclude=folder["id"])
             ids = [p[0] for p in paths]
@@ -330,6 +353,66 @@ class Window(Adw.ApplicationWindow):
 
         dialog.connect("response", on_response)
         dialog.present(self)
+
+    def _export(self, item):
+        """Export everything (item None), a folder with its contents or a server. No passwords."""
+        if item is None:
+            data, name = self.store.export(), "blue-pages"
+        elif item.kind == "folder":
+            data, name = self.store.export(folder_id=item.data["id"]), item.data["name"]
+        else:
+            data, name = self.store.export(server=item.data), item.data["name"]
+        dialog = Gtk.FileDialog(title="Export Servers", initial_name=f"{name}.json",
+                                default_filter=json_filter())
+
+        def on_chosen(dialog, result):
+            try:
+                file = dialog.save_finish(result)
+            except GLib.Error:
+                return  # dismissed
+            contents = json.dumps(data, indent=2, ensure_ascii=False).encode()
+            try:
+                file.replace_contents(contents, None, False,
+                                      Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+            except GLib.Error as e:
+                self.toasts.add_toast(Adw.Toast(title=f"Export failed: {e.message}", timeout=6))
+                return
+            count = count_text(len(data["servers"]), len(data["folders"]))
+            self.toasts.add_toast(Adw.Toast(title=f"Exported {count}"))
+
+        dialog.save(self, None, on_chosen)
+
+    def _import(self, folder):
+        """Import an exported file inside folder (None = root)."""
+        dialog = Gtk.FileDialog(title="Import Servers", default_filter=json_filter())
+
+        def on_chosen(dialog, result):
+            try:
+                file = dialog.open_finish(result)
+            except GLib.Error:
+                return  # dismissed
+            try:
+                _ok, contents, _etag = file.load_contents(None)
+                n_folders, n_servers = self.store.import_data(
+                    json.loads(contents), folder and folder["id"])
+            except GLib.Error as e:
+                error = e.message
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                error = "Not a Blue Pages export"
+            except ValueError as e:
+                error = str(e)
+            else:
+                if folder:
+                    self.expanded.add(folder["id"])
+                    self._focus(folder)
+                else:
+                    self.refresh()
+                count = count_text(n_servers, n_folders)
+                self.toasts.add_toast(Adw.Toast(title=f"Imported {count}"))
+                return
+            self.toasts.add_toast(Adw.Toast(title=f"Import failed: {error}", timeout=6))
+
+        dialog.open(self, None, on_chosen)
 
     # --- model ---
     def _focus(self, obj):
@@ -456,6 +539,8 @@ class Window(Adw.ApplicationWindow):
         else:
             self.menu_model.append("New Server Here", "win.ctx-new-server")
             self.menu_model.append("New Subfolder", "win.ctx-new-folder")
+            self.menu_model.append("Import Here…", "win.ctx-import")
+        self.menu_model.append("Export…", "win.ctx-export")
         self.menu_model.append("Edit", "win.ctx-edit")
         self.menu_model.append("Delete", "win.ctx-delete")
         rect = Gdk.Rectangle()

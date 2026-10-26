@@ -16,6 +16,7 @@ CONFIG_DIR = os.path.join(CONFIG_HOME, "blue-pages")
 DATA_FILE = os.path.join(CONFIG_DIR, "servers.json")
 
 PROTOCOLS = ["smb", "sftp", "ftp", "dav", "davs", "afp", "nfs"]
+EXPORT_VERSION = 1
 
 
 def _schema(name):
@@ -180,3 +181,71 @@ class Store:
         Secret.password_clear_sync(SCHEMA, {"id": server["id"]}, None)
         self.servers.remove(server)
         self.save()
+
+    # --- export / import ------------------------------------------------
+    def export(self, folder_id=None, server=None):
+        """Everything, a folder with its contents, or one server, as a dict. Never passwords."""
+        if server:
+            folders, servers = [], [dict(server, folder_id=None)]
+        elif folder_id:
+            ids = self.subtree(folder_id)
+            folders = [dict(f, parent_id=None) if f["id"] == folder_id else dict(f)
+                       for f in self.folders if f["id"] in ids]
+            servers = [dict(s) for s in self.servers if s["folder_id"] in ids]
+        else:
+            folders = [dict(f) for f in self.folders]
+            servers = [dict(s) for s in self.servers]
+        return {"app": APP_ID, "version": EXPORT_VERSION, "folders": folders, "servers": servers}
+
+    def import_data(self, data, parent_id=None):
+        """Add the folders and servers of an export inside parent_id (None = root), with new IDs.
+
+        Returns (n_folders, n_servers).
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("folders"), list) \
+                or not isinstance(data.get("servers"), list):
+            raise ValueError("Not a Blue Pages export")
+
+        def text(d, key):
+            value = d.get(key)
+            return value.strip() if isinstance(value, str) else ""
+
+        new_ids = {}
+        folders = []
+        for f in data["folders"]:
+            if isinstance(f, dict) and text(f, "name") and isinstance(f.get("id"), str):
+                new_ids[f["id"]] = uuid.uuid4().hex
+                folders.append(f)
+        folders = [{"id": new_ids[f["id"]], "name": text(f, "name"),
+                    "parent_id": new_ids.get(text(f, "parent_id"))} for f in folders]
+        # A folder that is its own ancestor would never be shown: move it to the root.
+        parents = {f["id"]: f for f in folders}
+        for f in folders:
+            seen = set()
+            node = f
+            while node and node["parent_id"]:
+                if node["id"] in seen:
+                    node["parent_id"] = None
+                    break
+                seen.add(node["id"])
+                node = parents.get(node["parent_id"])
+        for f in folders:
+            f["parent_id"] = f["parent_id"] or parent_id
+
+        servers = []
+        for s in data["servers"]:
+            if not isinstance(s, dict) or not text(s, "name") or not text(s, "address"):
+                continue
+            protocol = text(s, "protocol")
+            servers.append({
+                "id": uuid.uuid4().hex,
+                "name": text(s, "name"),
+                "protocol": protocol if protocol in PROTOCOLS else "smb",
+                "address": text(s, "address"),
+                "user": text(s, "user"),
+                "folder_id": new_ids.get(text(s, "folder_id")) or parent_id,
+            })
+        self.folders.extend(folders)
+        self.servers.extend(servers)
+        self.save()
+        return len(folders), len(servers)
