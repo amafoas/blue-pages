@@ -50,6 +50,9 @@ Your saved servers and passwords are not deleted.
 - **+** adds a server or a folder.
 - **Click** a server to mount it and open it in Files. Click a folder to expand it.
 - **Right-click** a row to edit or delete it, or to create a server or subfolder inside a folder.
+  On a server, **Open SSH Terminal** opens a terminal running `ssh user@host` (the port in the
+  address is used only for SFTP servers; the password is typed in the terminal). The terminal
+  is titled `folder · server · host`, although the remote shell may replace that title.
 - Start typing (or use the search button) to filter servers.
 - **Preferences** (main menu or <kbd>Ctrl</kbd>+<kbd>,</kbd>): choose whether servers open
   in a new Files window or in a new tab of the window that is already open.

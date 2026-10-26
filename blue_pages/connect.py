@@ -1,5 +1,6 @@
 """Mounts a server through GVfs (like Nautilus > Other Locations) and opens it."""
-from urllib.parse import quote
+import shutil
+from urllib.parse import quote, urlsplit
 
 import gi
 
@@ -27,6 +28,66 @@ def _split_domain(user):
         domain, user = user.split("\\", 1)
         return domain, user
     return None, user
+
+
+# (executable, arguments that go before the command to run), in order of preference.
+TERMINALS = [
+    ("xdg-terminal-exec", []),
+    ("ptyxis", ["--new-window", "--"]),
+    ("kgx", ["--"]),
+    ("gnome-terminal", ["--"]),
+    ("konsole", ["-e"]),
+    ("xfce4-terminal", ["-x"]),
+    ("x-terminal-emulator", ["-e"]),
+    ("xterm", ["-e"]),
+]
+
+
+def _ssh_target(server):
+    """(scheme, urlsplit result) for the server's address."""
+    address = server["address"].strip()
+    scheme = server["protocol"]
+    if "://" in address:
+        scheme, address = address.split("://", 1)
+    parts = urlsplit("//" + address.lstrip("/"))
+    if not parts.hostname:
+        raise ValueError("The server has no host")
+    return scheme, parts
+
+
+def ssh_host(server):
+    """Just the host or IP of the server, without user, port or path."""
+    return _ssh_target(server)[1].hostname
+
+
+def ssh_command(server):
+    """ssh argv for the server's host. The port is kept only for SFTP (it's the SSH port)."""
+    scheme, parts = _ssh_target(server)
+    _, user = _split_domain(parts.username or server.get("user", "").strip())
+    cmd = ["ssh"]
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port and scheme in ("sftp", "ssh"):
+        cmd += ["-p", str(port)]
+    cmd.append(f"{user}@{parts.hostname}" if user else parts.hostname)
+    return cmd
+
+
+def open_ssh_terminal(server, title=None):
+    """Open a terminal running ssh to the server. Raises ValueError/GLib.Error on failure."""
+    cmd = ssh_command(server)
+    if title:
+        # Set the window title with an escape sequence, which every terminal understands.
+        # The remote shell may replace it later from its prompt.
+        cmd = ["sh", "-c", 'printf "\\033]0;%s\\007" "$1"; shift; exec "$@"', "sh", title, *cmd]
+    for exe, args in TERMINALS:
+        path = shutil.which(exe)
+        if path:
+            Gio.Subprocess.new([path, *args, *cmd], Gio.SubprocessFlags.NONE)
+            return
+    raise ValueError("No terminal emulator found")
 
 
 def _launch_default(uri):

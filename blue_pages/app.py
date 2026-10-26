@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GObject, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from . import APP_ID, APP_NAME, connect
 from .settings import Settings
@@ -239,6 +239,7 @@ class Window(Adw.ApplicationWindow):
             "new-server": lambda: self._new_server(None),
             "new-folder": lambda: self._new_folder(None),
             "ctx-open": lambda: self.open_server(self.context_item.data),
+            "ctx-ssh": lambda: self.open_ssh(self.context_item.data),
             "ctx-new-server": lambda: self._new_server(self.context_item.data["id"]),
             "ctx-new-folder": lambda: self._new_folder(self.context_item.data["id"]),
             "ctx-edit": self._edit,
@@ -451,6 +452,7 @@ class Window(Adw.ApplicationWindow):
         self.menu_model.remove_all()
         if item.kind == "server":
             self.menu_model.append("Open", "win.ctx-open")
+            self.menu_model.append("Open SSH Terminal", "win.ctx-ssh")
         else:
             self.menu_model.append("New Server Here", "win.ctx-new-server")
             self.menu_model.append("New Subfolder", "win.ctx-new-folder")
@@ -482,6 +484,14 @@ class Window(Adw.ApplicationWindow):
         connect.open_server(server, self.store.get_password(server["id"]), self, done,
                             on_new_password=lambda pw: self.store.set_password(server, pw),
                             new_window=self.settings["open_in"] == "window")
+
+    def open_ssh(self, server):
+        try:
+            folder = self.store.get_folder(server["folder_id"])
+            parts = [folder and folder["name"], server["name"], connect.ssh_host(server)]
+            connect.open_ssh_terminal(server, " · ".join(p for p in parts if p))
+        except (ValueError, GLib.Error) as e:
+            self.toasts.add_toast(Adw.Toast(title=f"{server['name']}: {e}", timeout=6))
 
 
 class App(Adw.Application):
