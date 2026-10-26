@@ -9,6 +9,8 @@ SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
 DEFAULTS = {
     # "window": always a new Files window; "tab": a new tab in an open Files window.
     "open_in": "window",
+    # Keep the SSH terminal title, dropping the title changes sent by the remote shell.
+    "keep_ssh_title": False,
 }
 
 

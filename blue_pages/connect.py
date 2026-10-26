@@ -1,5 +1,7 @@
 """Mounts a server through GVfs (like Nautilus > Other Locations) and opens it."""
+import os
 import shutil
+import sys
 from urllib.parse import quote, urlsplit
 
 import gi
@@ -29,6 +31,8 @@ def _split_domain(user):
         return domain, user
     return None, user
 
+
+KEEP_TITLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keep_title.py")
 
 # (executable, arguments that go before the command to run), in order of preference.
 TERMINALS = [
@@ -75,12 +79,16 @@ def ssh_command(server):
     return cmd
 
 
-def open_ssh_terminal(server, title=None):
-    """Open a terminal running ssh to the server. Raises ValueError/GLib.Error on failure."""
+def open_ssh_terminal(server, title=None, keep_title=False):
+    """Open a terminal running ssh to the server. Raises ValueError/GLib.Error on failure.
+
+    The title is set with an escape sequence, which every terminal understands. With
+    keep_title, the title changes sent by the remote shell (e.g. from its prompt) are dropped.
+    """
     cmd = ssh_command(server)
-    if title:
-        # Set the window title with an escape sequence, which every terminal understands.
-        # The remote shell may replace it later from its prompt.
+    if title and keep_title:
+        cmd = [sys.executable, KEEP_TITLE, title, *cmd]
+    elif title:
         cmd = ["sh", "-c", 'printf "\\033]0;%s\\007" "$1"; shift; exec "$@"', "sh", title, *cmd]
     for exe, args in TERMINALS:
         path = shutil.which(exe)

@@ -173,10 +173,21 @@ class PreferencesDialog(Adw.PreferencesDialog):
         open_in.connect("notify::selected",
                         lambda row, _: settings.__setitem__("open_in", keys[row.get_selected()]))
 
+        keep_title = Adw.SwitchRow(
+            title="Keep Terminal Title",
+            subtitle="Don't let the server rename the SSH terminal window",
+            active=settings["keep_ssh_title"],
+        )
+        keep_title.connect("notify::active",
+                           lambda row, _: settings.__setitem__("keep_ssh_title", row.get_active()))
+
         group = Adw.PreferencesGroup(title="Files")
         group.add(open_in)
+        ssh_group = Adw.PreferencesGroup(title="SSH")
+        ssh_group.add(keep_title)
         page = Adw.PreferencesPage(title="General", icon_name="preferences-system-symbolic")
         page.add(group)
+        page.add(ssh_group)
         self.add(page)
 
 
@@ -574,7 +585,8 @@ class Window(Adw.ApplicationWindow):
         try:
             folder = self.store.get_folder(server["folder_id"])
             parts = [folder and folder["name"], server["name"], connect.ssh_host(server)]
-            connect.open_ssh_terminal(server, " · ".join(p for p in parts if p))
+            connect.open_ssh_terminal(server, " · ".join(p for p in parts if p),
+                                      keep_title=self.settings["keep_ssh_title"])
         except (ValueError, GLib.Error) as e:
             self.toasts.add_toast(Adw.Toast(title=f"{server['name']}: {e}", timeout=6))
 
